@@ -5,19 +5,37 @@ from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 import numpy as np
 import faiss
-import openai
+from openai import OpenAI
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-# get env variables from .env file
+# Load environment variables
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# make flask app
+# Configuration for different API providers
+API_PROVIDERS = {
+    "groq": {
+        "base_url": "https://api.groq.com/openai/v1",
+        "api_key": "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",  # Your existing key
+        "model": "llama3-8b-8192"  # or "mixtral-8x7b-32768"
+    }
+}
+
+# Choose your provider here
+CURRENT_PROVIDER = "groq"  # Change to: "huggingface", "openai_free", or "ollama"
+
+# Initialize OpenAI client with selected provider
+provider_config = API_PROVIDERS[CURRENT_PROVIDER]
+client = OpenAI(
+    base_url=provider_config["base_url"],
+    api_key=provider_config["api_key"]
+)
+
+# Flask app
 app = Flask(__name__)
-CORS(app)  # Enable CORS for frontend integration
+CORS(app)
 
-# initialize model for embeddings
+# Initialize model for embeddings
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 class RAGSystem:
@@ -25,7 +43,7 @@ class RAGSystem:
         self.index = None
         self.chunks = None
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
-        
+    
     def extract_text_from_pdf(self, path):
         all_text = ""
         try:
@@ -36,7 +54,6 @@ class RAGSystem:
             doc.close()
             return all_text
         except Exception as e:
-            #error handling
             print(f"Error extracting text from PDF: {e}")
             return None
     
@@ -59,7 +76,6 @@ class RAGSystem:
             faiss.write_index(index, "data/vector.index")
             with open("data/chunks.json", "w") as f:
                 json.dump(chunks, f)
-            
             print("✅ FAISS index and chunks saved!")
             return True
         except Exception as e:
@@ -83,18 +99,11 @@ class RAGSystem:
             return False
     
     def semantic_search(self, query, top_k=5):
-        #finding relevant chunks
         if self.index is None or self.chunks is None:
             return []
-        
         try:
-            # encode prompt
             query_embedding = self.model.encode([query]).astype("float32")
-            
-            #search using faiss
             distances, indices = self.index.search(query_embedding, top_k)
-            
-            # find relevant chnks
             relevant_chunks = []
             for i, idx in enumerate(indices[0]):
                 if idx < len(self.chunks):
@@ -103,50 +112,73 @@ class RAGSystem:
                         'distance': float(distances[0][i]),
                         'index': int(idx)
                     })
-            
             return relevant_chunks
         except Exception as e:
             print(f"Error in semantic search: {e}")
             return []
     
     def answer_with_llm(self, question, context_chunks):
-        #get answer
         try:
             context = "\n\n".join([chunk['chunk'] for chunk in context_chunks])
-            
             prompt = f"""You are an expert tutor in AP Physics C. Use the provided context to answer the question accurately and concisely.
-            
+
 Context: {context}
 
 Question: {question}
 
 Answer:"""
+
+            # Provider-specific model selection
+            model_name = provider_config["model"]
             
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=300,
-                temperature=0.2,
-            )
+            # Adjust parameters based on provider
+            if CURRENT_PROVIDER == "groq":
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=300,
+                    temperature=0.2
+                )
+            elif CURRENT_PROVIDER == "huggingface":
+                # Hugging Face might need different parameters
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=300,
+                    temperature=0.2
+                )
+            elif CURRENT_PROVIDER == "openai_free":
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=300,
+                    temperature=0.2
+                )
+            elif CURRENT_PROVIDER == "ollama":
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=300,
+                    temperature=0.2
+                )
             
             return response.choices[0].message.content.strip()
+            
         except Exception as e:
-            print(f"Error generating answer: {e}")
-            return "Sorry, I encountered an error while generating the answer."
+            print(f"Error generating answer with {CURRENT_PROVIDER}: {e}")
+            return f"Sorry, I encountered an error while generating the answer using {CURRENT_PROVIDER}."
     
     def initialize_from_pdf(self, pdf_path):
-        #start rag system
         pdf_text = self.extract_text_from_pdf(pdf_path)
         if not pdf_text:
             return False
         chunks = self.chunk_text(pdf_text)
         return self.build_and_save_embeddings(chunks)
 
-# initialize RAG system
+# Initialize RAG system
 rag_system = RAGSystem()
 
-
-#checking for errors in initalization
+# Load existing index or create new one
 if not rag_system.load_faiss_and_chunks():
     print("No existing index found. Initializing from PDF...")
     pdf_path = "/Users/neilthakkar/Downloads/ap-physics-c-mechanics-course-and-exam-description-2.pdf"
@@ -158,23 +190,24 @@ if not rag_system.load_faiss_and_chunks():
 # Flask API Routes
 @app.route('/health', methods=['GET'])
 def health_check():
-    #checking whether flask api works
-    return jsonify({"status": "healthy", "message": "RAG system is running"})
+    return jsonify({
+        "status": "healthy", 
+        "message": "RAG system is running",
+        "provider": CURRENT_PROVIDER,
+        "model": provider_config["model"]
+    })
 
 @app.route('/query', methods=['POST'])
 def query_rag():
-    #this is the function to which the API works
     try:
         data = request.get_json()
-        
         if not data or 'question' not in data:
             return jsonify({"error": "Question is required"}), 400
         
         question = data['question']
         top_k = data.get('top_k', 5)
-
-        relevant_chunks = rag_system.semantic_search(question, top_k)
         
+        relevant_chunks = rag_system.semantic_search(question, top_k)
         if not relevant_chunks:
             return jsonify({"error": "No relevant context found"}), 404
         
@@ -183,6 +216,8 @@ def query_rag():
         return jsonify({
             "question": question,
             "answer": answer,
+            "provider": CURRENT_PROVIDER,
+            "model": provider_config["model"],
             "relevant_chunks": [
                 {
                     "chunk": chunk['chunk'][:200] + "..." if len(chunk['chunk']) > 200 else chunk['chunk'],
@@ -195,59 +230,92 @@ def query_rag():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# @app.route('/search', methods=['POST'])
-# def search_chunks():
-#     """Search for relevant chunks without generating answer"""
-#     try:
-#         data = request.get_json()
+@app.route('/switch_provider', methods=['POST'])
+def switch_provider():
+    """Switch between different API providers"""
+    global CURRENT_PROVIDER, client, provider_config
+    
+    try:
+        data = request.get_json()
+        new_provider = data.get('provider')
         
-#         if not data or 'query' not in data:
-#             return jsonify({"error": "Query is required"}), 400
+        if new_provider not in API_PROVIDERS:
+            return jsonify({"error": f"Invalid provider. Available: {list(API_PROVIDERS.keys())}"}), 400
         
-#         query = data['query']
-#         top_k = data.get('top_k', 10)
+        CURRENT_PROVIDER = new_provider
+        provider_config = API_PROVIDERS[CURRENT_PROVIDER]
         
-#         relevant_chunks = rag_system.semantic_search(query, top_k)
+        # Reinitialize client with new provider
+        client = OpenAI(
+            base_url=provider_config["base_url"],
+            api_key=provider_config["api_key"]
+        )
         
-#         return jsonify({
-#             "query": query,
-#             "chunks": [
-#                 {
-#                     "chunk": chunk['chunk'],
-#                     "distance": chunk['distance'],
-#                     "index": chunk['index']
-#                 }
-#                 for chunk in relevant_chunks
-#             ]
-#         })
+        return jsonify({
+            "message": f"Switched to {CURRENT_PROVIDER}",
+            "provider": CURRENT_PROVIDER,
+            "model": provider_config["model"]
+        })
         
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-# @app.route('/reload', methods=['POST'])
-# def reload_index():
-#     try:
-#         if rag_system.load_faiss_and_chunks():
-#             return jsonify({"message": "Index reloaded successfully"})
-#         else:
-#             return jsonify({"error": "Failed to reload index"}), 500
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
+@app.route('/providers', methods=['GET'])
+def list_providers():
+    """List all available API providers"""
+    return jsonify({
+        "current_provider": CURRENT_PROVIDER,
+        "available_providers": {
+            name: {"model": config["model"], "base_url": config["base_url"]} 
+            for name, config in API_PROVIDERS.items()
+        }
+    })
 
-# @app.route('/stats', methods=['GET'])
-# def get_stats():
-#     try:
-#         if rag_system.index and rag_system.chunks:
-#             return jsonify({
-#                 "total_vectors": int(rag_system.index.ntotal),
-#                 "total_chunks": len(rag_system.chunks),
-#                 "embedding_dimension": rag_system.index.d,
-#                 "model_name": "all-MiniLM-L6-v2"
-#             })
-#         else:
-#             return jsonify({"error": "System not initialized"}), 500
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
+# Other existing routes...
+@app.route('/search', methods=['POST'])
+def search_chunks():
+    try:
+        data = request.get_json()
+        if not data or 'query' not in data:
+            return jsonify({"error": "Query is required"}), 400
+        
+        query = data['query']
+        top_k = data.get('top_k', 10)
+        
+        relevant_chunks = rag_system.semantic_search(query, top_k)
+        
+        return jsonify({
+            "query": query,
+            "chunks": [
+                {
+                    "chunk": chunk['chunk'],
+                    "distance": chunk['distance'],
+                    "index": chunk['index']
+                }
+                for chunk in relevant_chunks
+            ]
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/stats', methods=['GET'])
+def get_stats():
+    try:
+        if rag_system.index and rag_system.chunks:
+            return jsonify({
+                "total_vectors": int(rag_system.index.ntotal),
+                "total_chunks": len(rag_system.chunks),
+                "embedding_dimension": rag_system.index.d,
+                "model_name": "all-MiniLM-L6-v2",
+                "current_provider": CURRENT_PROVIDER,
+                "llm_model": provider_config["model"]
+            })
+        else:
+            return jsonify({"error": "System not initialized"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
+    print(f"Starting RAG system with provider: {CURRENT_PROVIDER}")
+    print(f"Using model: {provider_config['model']}")
     app.run(debug=True, host='0.0.0.0', port=5000)
