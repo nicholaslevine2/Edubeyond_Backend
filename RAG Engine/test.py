@@ -16,8 +16,23 @@ load_dotenv()
 API_PROVIDERS = {
     "groq": {
         "base_url": "https://api.groq.com/openai/v1",
-        "api_key": "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",  # Your existing key
+        "api_key": os.getenv('API_KEY'),  # Your existing key
         "model": "llama3-8b-8192"  # or "mixtral-8x7b-32768"
+    },
+    "huggingface": {
+        "base_url": "https://api-inference.huggingface.co/v1",
+        "api_key": "hf_YOUR_TOKEN_HERE",  # Get from huggingface.co/settings/tokens
+        "model": "microsoft/DialoGPT-medium"
+    },
+    "openai_free": {
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "sk-YOUR_OPENAI_KEY_HERE",  # Get from platform.openai.com
+        "model": "gpt-3.5-turbo"
+    },
+    "ollama": {
+        "base_url": "http://localhost:11434/v1",  # Local Ollama server
+        "api_key": "ollama",  # Ollama doesn't need real key
+        "model": "llama2"  # or "mistral", "codellama", etc.
     }
 }
 
@@ -316,6 +331,6 @@ def get_stats():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    print(f"Starting RAG system with provider: {CURRENT_PROVIDER}")
-    print(f"Using model: {provider_config['model']}")
+    print(f"🚀 Starting RAG system with provider: {CURRENT_PROVIDER}")
+    print(f"📊 Using model: {provider_config['model']}")
     app.run(debug=True, host='0.0.0.0', port=5000)
