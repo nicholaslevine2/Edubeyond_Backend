@@ -196,7 +196,7 @@ rag_system = RAGSystem()
 # Load existing index or create new one
 if not rag_system.load_faiss_and_chunks():
     print("No existing index found. Initializing from PDF...")
-    pdf_path = "/Users/neilthakkar/Downloads/ap-physics-c-mechanics-course-and-exam-description-2.pdf"
+    pdf_path = "./data/ap-physics-c-mechanics-course-and-exam-description.pdf"
     if rag_system.initialize_from_pdf(pdf_path):
         rag_system.load_faiss_and_chunks()
     else:
