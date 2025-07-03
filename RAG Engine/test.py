@@ -333,4 +333,4 @@ def get_stats():
 if __name__ == '__main__':
     print(f"🚀 Starting RAG system with provider: {CURRENT_PROVIDER}")
     print(f"📊 Using model: {provider_config['model']}")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=os.getenv('PORT'))
